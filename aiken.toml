@@ -1,0 +1,14 @@
+name = "aiken-m/marlowe"
+version = "0.0.0"
+license = "Apache-2.0"
+description = "Aiken contracts for project 'aiken-m/marlowe'"
+
+[repository]
+user = "aiken-m"
+project = "marlowe"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "main"
+source = "github"
