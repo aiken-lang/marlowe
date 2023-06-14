@@ -174,6 +174,17 @@ type ReduceResult {
   RRAmbiguousTimeIntervalError
 }
 
+type ReduceStepResult {
+  Reduced(ReduceWarning, ReduceEffect, State, Contract)
+  NotReduced
+  AmbiguousTimeIntervalReductionError
+}
+
+type ReduceEffect {
+  ReduceWithPayment(Payment)
+  ReduceNoPayment
+}
+
 type TransactionError {
   TEAmbiguousTimeIntervalError
   TEApplyNoMatchError
@@ -832,12 +843,74 @@ fn apply_all_loop(
   }
 }
 
+/// Reduce a contract until it cannot be reduced more.
 fn reduce_contract_until_quiescent(
   env: Environment,
   state: State,
   contract: Contract,
-) {
-  todo
+) -> ReduceResult {
+  reduction_loop(False, env, state, contract, [], [])
+}
+
+fn reduction_loop(
+  reduced: Bool,
+  env: Environment,
+  state: State,
+  contract: Contract,
+  warnings: List<ReduceWarning>,
+  payments: List<Payment>,
+) -> ReduceResult {
+  when reduce_contract_step(env, state, contract) is {
+    Reduced(warning, effect, new_state, cont) -> {
+      let new_warnings =
+        when warning is {
+          ReduceNoWarning -> warnings
+          _ ->
+            [warning, ..warnings]
+        }
+
+      let new_payments =
+        when effect is {
+          ReduceWithPayment(payment) ->
+            [payment, ..payments]
+          ReduceNoPayment -> payments
+        }
+
+      reduction_loop(True, env, new_state, cont, new_warnings, new_payments)
+    }
+
+    AmbiguousTimeIntervalReductionError -> RRAmbiguousTimeIntervalError
+
+    // this is the last invocation of reductionLoop, so we can reverse lists
+    NotReduced ->
+      ContractQuiescent(
+        reduced,
+        list.reverse(warnings),
+        list.reverse(payments),
+        state,
+        contract,
+      )
+  }
+}
+
+/// Carry a step of the contract with no inputs.
+fn reduce_contract_step(env: Environment, state: State, contract: Contract) {
+  when contract is {
+    // SCP-5126: Although `refundOne` refunds accounts-token combinations
+    // in least-recently-added order and Isabelle semantics requires that
+    // they be refunded in lexicographic order, `reduceContractUntilQuiescent`
+    // ensures that the `Close` pattern will be executed until `accounts`
+    // is empty. Thus, the net difference between the behavior here and the
+    // Isabelle semantics is that the `ContractQuiescent` resulting from
+    // `reduceContractUntilQuiescent` will contain payments in a different
+    // order.
+    Close -> todo
+    Pay(acc_id, payee, tok, val, cont) -> todo
+    If(obs, cont1, cont2) -> todo
+    When(_, timeout, cont) -> todo
+    Let(val_id, val, cont) -> todo
+    Assert(obs, cont) -> todo
+  }
 }
 
 fn convert_reduce_warnings(
