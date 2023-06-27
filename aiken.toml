@@ -1,10 +1,10 @@
-name = "aiken-m/marlowe"
+name = "aiken-lang/marlowe"
 version = "0.0.0"
 license = "Apache-2.0"
-description = "Aiken contracts for project 'aiken-m/marlowe'"
+description = "Marlowe validator implemented in Aiken"
 
 [repository]
-user = "aiken-m"
+user = "aiken-lang"
 project = "marlowe"
 platform = "github"
 
