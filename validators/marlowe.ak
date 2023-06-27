@@ -261,7 +261,7 @@ type ApplyAllResult {
 }
 
 validator(validator_hash: ByteArray) {
-  fn marlowe_validator(
+  fn execute(
     datum: MarloweData,
     redeemer: MarloweInput,
     ctx: ScriptContext,
@@ -1033,7 +1033,7 @@ fn eval_observation(env: Environment, state: State, obs: Observation) -> Bool {
     // to Marlowe's Isabelle semantics given the precondition that
     // the initial state's `choices` in Isabelle was sorted and did
     // not contain duplicate entries.
-    ChoseSomething(choice_id) -> todo
+    ChoseSomething(choice_id) -> extensions.contains(state.choices, choice_id)
     ValueGE(lhs, rhs) ->
       eval_value(env, state, lhs) >= eval_value(env, state, rhs)
     ValueGT(lhs, rhs) ->
@@ -1058,7 +1058,7 @@ fn eval_value(
     AvailableMoney(acc_id, token) ->
       money_in_account(acc_id, token, state.accounts)
     Constant(integer) -> integer
-    NegValue(val) -> todo
+    NegValue(val) -> 0 - eval_value(env, state, val)
     AddValue(lhs, rhs) ->
       eval_value(env, state, lhs) + eval_value(env, state, rhs)
     SubValue(lhs, rhs) ->
@@ -1081,16 +1081,30 @@ fn eval_value(
       // Marlowe's Isabelle semantics given the precondition that
       // the initial state's `choices` in Isabelle was sorted and
       // did not contain duplicate entries.
-      todo
-    TimeIntervalStart -> todo
-    TimeIntervalEnd -> todo
+      when extensions.get(state.choices, choice_id) is {
+        Some(choice) -> choice
+        None -> 0
+      }
+    TimeIntervalStart -> {
+      let (start_time, _) = env.time_interval
+
+      start_time
+    }
+    TimeIntervalEnd -> {
+      let (_, end_time) = env.time_interval
+
+      end_time
+    }
     UseValue(val_id) ->
       // SCP-5126: Given the precondition that `boundValues` contains
       // no duplicate entries, this lookup behaves identically to
       // Marlowe's Isabelle semantics given the precondition that
       // the initial state's `boundValues` in Isabelle was sorted
       // and did not contain duplicate entries.
-      todo
+      when extensions.get(state.bound_values, val_id) is {
+        Some(val) -> val
+        None -> 0
+      }
     Cond(cond, thn, els) ->
       if eval_observation(env, state, cond) {
         eval_value(env, state, thn)
@@ -1112,26 +1126,49 @@ fn money_in_account(
 }
 
 fn update_money_in_account(
-  acc_id: AccountId,
+  account_id: AccountId,
   token: Token,
   amount: Int,
   accounts: Accounts,
 ) -> Accounts {
   if amount <= 0 {
-    todo
+    extensions.remove(accounts, IdToken { account_id, token })
   } else {
-    todo
+    extensions.insert(accounts, IdToken { account_id, token }, amount)
   }
 }
 
 fn give_money(
-  acc_id: AccountId,
+  account_id: AccountId,
   payee: Payee,
   token: Token,
   amount: Int,
   accounts: Accounts,
 ) -> (ReduceEffect, Accounts) {
-  todo
+  let new_accounts =
+    when payee is {
+      Party(_) -> accounts
+      Account(acc_id) -> add_money_to_account(acc_id, token, amount, accounts)
+    }
+
+  (ReduceWithPayment(Payment(account_id, payee, token, amount)), new_accounts)
+}
+
+fn add_money_to_account(
+  acc_id: AccountId,
+  token: Token,
+  amount: Int,
+  accounts: Accounts,
+) -> Accounts {
+  let balance = money_in_account(acc_id, token, accounts)
+
+  let new_balance = balance + amount
+
+  if amount <= 0 {
+    accounts
+  } else {
+    update_money_in_account(acc_id, token, new_balance, accounts)
+  }
 }
 
 fn refund_one(accounts: Accounts) -> Option<((Party, Token, Int), Accounts)> {

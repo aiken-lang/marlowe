@@ -23,6 +23,18 @@ pub fn get(self: List<(a, b)>, key: a) -> Option<b> {
   }
 }
 
+pub fn contains(self: List<(a, b)>, key: a) -> Bool {
+  when self is {
+    [] -> False
+    [(k, _), ..tail] ->
+      if k == key {
+        True
+      } else {
+        contains(tail, key)
+      }
+  }
+}
+
 pub fn remove(self: List<(a, b)>, key: a) -> List<(a, b)> {
   when self is {
     [] ->
