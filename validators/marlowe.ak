@@ -1,6 +1,8 @@
-use aiken/dict.{Dict}
+use aiken/builtin
+use aiken/dict
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
+use aiken/math
 use aiken/string
 use aiken/transaction.{
   DatumHash, Input as ContextInput, Output, ScriptContext, Spend, Transaction,
@@ -9,8 +11,9 @@ use aiken/transaction/credential.{
   Address, ScriptCredential, VerificationKeyCredential,
 }
 use aiken/transaction/value.{
-  AssetName, PolicyId, Value as ContextValue, quantity_of,
+  AssetName, PolicyId, Value as ContextValue, ada_policy_id, quantity_of,
 }
+use marlowe/extensions
 
 type Datum {
   currency: PolicyId,
@@ -18,7 +21,7 @@ type Datum {
 }
 
 validator {
-  fn role_payout_validator(datum: Datum, _red, ctx: ScriptContext) -> Bool {
+  fn role_payout(datum: Datum, _red, ctx: ScriptContext) -> Bool {
     // clean way to pull out inputs from the script context
     let ScriptContext { transaction: Transaction { inputs, .. }, .. } = ctx
 
@@ -62,9 +65,8 @@ type ChoiceId {
   party: Party,
 }
 
-type ValueId {
-  id: ByteArray,
-}
+type ValueId =
+  ByteArray
 
 type TimeOut =
   Int
@@ -258,8 +260,6 @@ type ApplyAllResult {
   ApplyAllHashMismatch
 }
 
-const ada_policy = ""
-
 validator(validator_hash: ByteArray) {
   fn marlowe_validator(
     datum: MarloweData,
@@ -439,7 +439,7 @@ validator(validator_hash: ByteArray) {
 
                   expect True =
                     trace_if_false(
-                      o_ada_amount >= p_ada_amount && p_ada_policy == ada_policy && o_ada_policy == ada_policy,
+                      o_ada_amount >= p_ada_amount && p_ada_policy == ada_policy_id && o_ada_policy == ada_policy_id,
                       @"p",
                     )
 
@@ -920,12 +920,218 @@ fn reduce_contract_step(env: Environment, state: State, contract: Contract) {
         }
         None -> NotReduced
       }
-    Pay(acc_id, payee, tok, val, cont) -> todo
-    If(obs, cont1, cont2) -> todo
-    When(_, timeout, cont) -> todo
-    Let(val_id, val, cont) -> todo
-    Assert(obs, cont) -> todo
+
+    Pay(acc_id, payee, tok, val, cont) -> {
+      let amount_to_pay = eval_value(env, state, val)
+
+      if amount_to_pay <= 0 {
+        let warning = ReduceNonPositivePay(acc_id, payee, tok, amount_to_pay)
+
+        Reduced(warning, ReduceNoPayment, state, cont)
+      } else {
+        let balance = money_in_account(acc_id, tok, state.accounts)
+        let paid_amount = math.min(balance, amount_to_pay)
+        let new_balance = balance - paid_amount
+
+        let new_accs =
+          update_money_in_account(acc_id, tok, new_balance, state.accounts)
+
+        let warning =
+          if paid_amount < amount_to_pay {
+            ReducePartialPay(acc_id, payee, tok, paid_amount, amount_to_pay)
+          } else {
+            ReduceNoWarning
+          }
+
+        let (payment, final_accs) =
+          give_money(acc_id, payee, tok, paid_amount, new_accs)
+
+        let new_state = State { ..state, accounts: final_accs }
+
+        Reduced(warning, payment, new_state, cont)
+      }
+    }
+
+    If(obs, cont1, cont2) -> {
+      let cont =
+        if eval_observation(env, state, obs) {
+          cont1
+        } else {
+          cont2
+        }
+
+      Reduced(ReduceNoWarning, ReduceNoPayment, state, cont)
+    }
+
+    When(_, timeout, cont) -> {
+      let (start_time, end_time) = env.time_interval
+
+      // if timeout in future – do not reduce
+      if end_time < timeout {
+        NotReduced
+      } else {
+        // if timeout in the past – reduce to timeout continuation
+
+        if timeout <= start_time {
+          Reduced(ReduceNoWarning, ReduceNoPayment, state, cont)
+        } else {
+          // if timeout in the time range – issue an ambiguity error
+          AmbiguousTimeIntervalReductionError
+        }
+      }
+    }
+
+    Let(val_id, val, cont) -> {
+      let evaluated_value = eval_value(env, state, val)
+      let bound_vals = state.bound_values
+      // SCP-5126: Given the precondition that `boundValues` contains
+      // no duplicate entries, this insertion behaves identically
+      // (aside from internal ordering) to Marlowe's Isabelle semantics
+      // given the precondition that the initial state's `boundValues`
+      // in Isabelle was sorted and did not contain duplicate entries.
+      let new_state =
+        State {
+          ..state,
+          bound_values: extensions.insert(bound_vals, val_id, evaluated_value),
+        }
+      // SCP-5126: Given the precondition that `boundValues` contains
+      // no duplicate entries, this lookup behaves identically to
+      // Marlowe's Isabelle semantics given the precondition that the
+      // initial state's `boundValues` in Isabelle was sorted and did
+      // not contain duplicate entries.
+      let warn =
+        when extensions.get(bound_vals, val_id) is {
+          Some(old_val) -> ReduceShadowing(val_id, old_val, evaluated_value)
+          None -> ReduceNoWarning
+        }
+
+      Reduced(warn, ReduceNoPayment, new_state, cont)
+    }
+
+    Assert(obs, cont) -> {
+      let warning =
+        if eval_observation(env, state, obs) {
+          ReduceNoWarning
+        } else {
+          ReduceAssertionFailed
+        }
+
+      Reduced(warning, ReduceNoPayment, state, cont)
+    }
   }
+}
+
+fn eval_observation(env: Environment, state: State, obs: Observation) -> Bool {
+  when obs is {
+    AndObs(lhs, rhs) ->
+      eval_observation(env, state, lhs) && eval_observation(env, state, rhs)
+    OrObs(lhs, rhs) ->
+      eval_observation(env, state, lhs) || eval_observation(env, state, rhs)
+    NotObs(sub_obs) -> !eval_observation(env, state, sub_obs)
+    // SCP-5126: Given the precondition that `choices` contains no
+    // duplicate entries, this membership test behaves identically
+    // to Marlowe's Isabelle semantics given the precondition that
+    // the initial state's `choices` in Isabelle was sorted and did
+    // not contain duplicate entries.
+    ChoseSomething(choice_id) -> todo
+    ValueGE(lhs, rhs) ->
+      eval_value(env, state, lhs) >= eval_value(env, state, rhs)
+    ValueGT(lhs, rhs) ->
+      eval_value(env, state, lhs) > eval_value(env, state, rhs)
+    ValueLT(lhs, rhs) ->
+      eval_value(env, state, lhs) < eval_value(env, state, rhs)
+    ValueLE(lhs, rhs) ->
+      eval_value(env, state, lhs) <= eval_value(env, state, rhs)
+    ValueEQ(lhs, rhs) ->
+      eval_value(env, state, lhs) == eval_value(env, state, rhs)
+    TrueObs -> True
+    FalseObs -> False
+  }
+}
+
+fn eval_value(
+  env: Environment,
+  state: State,
+  value_obs: Value<Observation>,
+) -> Int {
+  when value_obs is {
+    AvailableMoney(acc_id, token) ->
+      money_in_account(acc_id, token, state.accounts)
+    Constant(integer) -> integer
+    NegValue(val) -> todo
+    AddValue(lhs, rhs) ->
+      eval_value(env, state, lhs) + eval_value(env, state, rhs)
+    SubValue(lhs, rhs) ->
+      eval_value(env, state, lhs) - eval_value(env, state, rhs)
+    MulValue(lhs, rhs) ->
+      eval_value(env, state, lhs) * eval_value(env, state, rhs)
+    DivValue(lhs, rhs) -> {
+      let n = eval_value(env, state, lhs)
+      let d = eval_value(env, state, rhs)
+
+      if d == 0 {
+        0
+      } else {
+        builtin.quotient_integer(n, d)
+      }
+    }
+    ChoiceValue(choice_id) ->
+      // SCP-5126: Given the precondition that `choices` contains no
+      // duplicate entries, this lookup behaves identically to
+      // Marlowe's Isabelle semantics given the precondition that
+      // the initial state's `choices` in Isabelle was sorted and
+      // did not contain duplicate entries.
+      todo
+    TimeIntervalStart -> todo
+    TimeIntervalEnd -> todo
+    UseValue(val_id) ->
+      // SCP-5126: Given the precondition that `boundValues` contains
+      // no duplicate entries, this lookup behaves identically to
+      // Marlowe's Isabelle semantics given the precondition that
+      // the initial state's `boundValues` in Isabelle was sorted
+      // and did not contain duplicate entries.
+      todo
+    Cond(cond, thn, els) ->
+      if eval_observation(env, state, cond) {
+        eval_value(env, state, thn)
+      } else {
+        eval_value(env, state, els)
+      }
+  }
+}
+
+fn money_in_account(
+  account_id: AccountId,
+  token: Token,
+  accounts: Accounts,
+) -> Int {
+  when extensions.get(accounts, IdToken { account_id, token }) is {
+    Some(balance) -> balance
+    None -> 0
+  }
+}
+
+fn update_money_in_account(
+  acc_id: AccountId,
+  token: Token,
+  amount: Int,
+  accounts: Accounts,
+) -> Accounts {
+  if amount <= 0 {
+    todo
+  } else {
+    todo
+  }
+}
+
+fn give_money(
+  acc_id: AccountId,
+  payee: Payee,
+  token: Token,
+  amount: Int,
+  accounts: Accounts,
+) -> (ReduceEffect, Accounts) {
+  todo
 }
 
 fn refund_one(accounts: Accounts) -> Option<((Party, Token, Int), Accounts)> {
