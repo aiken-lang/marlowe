@@ -1,4 +1,4 @@
-use aiken/dict
+use aiken/dict.{Dict}
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
 use aiken/string
@@ -53,7 +53,7 @@ type Payment {
 }
 
 type IdToken {
-  account_id: Party,
+  account_id: AccountId,
   token: Token,
 }
 
@@ -74,7 +74,6 @@ type Bound {
 }
 
 type Value<a> {
-
   AvailableMoney(AccountId, Token)
   Constant(Int)
   NegValue(Value<a>)
@@ -114,8 +113,11 @@ type Action {
   Notify(Observation)
 }
 
+type Accounts =
+  List<(IdToken, Int)>
+
 type State {
-  accounts: List<(IdToken, Int)>,
+  accounts: Accounts,
   choices: List<(ChoiceId, Int)>,
   bound_values: List<(ByteArray, Int)>,
   min_time: Int,
@@ -904,12 +906,37 @@ fn reduce_contract_step(env: Environment, state: State, contract: Contract) {
     // Isabelle semantics is that the `ContractQuiescent` resulting from
     // `reduceContractUntilQuiescent` will contain payments in a different
     // order.
-    Close -> todo
+    Close ->
+      when refund_one(state.accounts) is {
+        Some(((party, token, amount), new_accounts)) -> {
+          let new_state = State { ..state, accounts: new_accounts }
+
+          Reduced(
+            ReduceNoWarning,
+            ReduceWithPayment(Payment(party, Party(party), token, amount)),
+            new_state,
+            Close,
+          )
+        }
+        None -> NotReduced
+      }
     Pay(acc_id, payee, tok, val, cont) -> todo
     If(obs, cont1, cont2) -> todo
     When(_, timeout, cont) -> todo
     Let(val_id, val, cont) -> todo
     Assert(obs, cont) -> todo
+  }
+}
+
+fn refund_one(accounts: Accounts) -> Option<((Party, Token, Int), Accounts)> {
+  when accounts is {
+    [] -> None
+    [(IdToken { account_id, token }, balance), ..rest] ->
+      if balance > 0 {
+        Some(((account_id, token, balance), rest))
+      } else {
+        refund_one(rest)
+      }
   }
 }
 
