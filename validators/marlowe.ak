@@ -260,6 +260,11 @@ type ApplyAllResult {
   ApplyAllHashMismatch
 }
 
+type ApplyAction {
+  AppliedAction(ApplyWarning, State)
+  NotAppliedAction
+}
+
 validator(validator_hash: ByteArray) {
   fn execute(
     datum: MarloweData,
@@ -834,7 +839,7 @@ fn apply_all_loop(
                 new_state,
                 next_cont,
                 rest,
-                list.concat(warnings, convert_apply_warnings(apply_warn)),
+                list.concat(warnings, convert_apply_warning(apply_warn)),
                 payments,
               )
             ApplyNoMatchError -> ApplyAllNoMatchError
@@ -1186,11 +1191,32 @@ fn refund_one(accounts: Accounts) -> Option<((Party, Token, Int), Accounts)> {
 fn convert_reduce_warnings(
   warnings: List<ReduceWarning>,
 ) -> List<TransactionWarning> {
-  todo
+  list.foldr(
+    warnings,
+    [],
+    fn(warning, acc) {
+      when warning is {
+        ReduceNoWarning -> acc
+        ReduceNonPositivePay(acc_id, payee, tok, amount) ->
+          [TransactionNonPositivePay(acc_id, payee, tok, amount), ..acc]
+        ReducePartialPay(acc_id, payee, tok, paid, expected) ->
+          [TransactionPartialPay(acc_id, payee, tok, paid, expected), ..acc]
+        ReduceShadowing(val_id, old_val, new_val) ->
+          [TransactionShadowing(val_id, old_val, new_val), ..acc]
+        ReduceAssertionFailed ->
+          [TransactionAssertionFailed, ..acc]
+      }
+    },
+  )
 }
 
-fn convert_apply_warnings(warnings: ApplyWarning) -> List<TransactionWarning> {
-  todo
+fn convert_apply_warning(warning: ApplyWarning) -> List<TransactionWarning> {
+  when warning is {
+    ApplyNoWarning ->
+      []
+    ApplyNonPositiveDeposit(party, acc_id, tok, amount) ->
+      [TransactionNonPositiveDeposit(party, acc_id, tok, amount)]
+  }
 }
 
 fn apply_input(
@@ -1207,9 +1233,142 @@ fn apply_input(
 
 fn apply_cases(
   env: Environment,
-  current_state: State,
+  state: State,
   input: Input,
   cases: List<Case<Contract>>,
 ) -> ApplyResult {
-  todo
+  when cases is {
+    [] -> ApplyNoMatchError
+    [head_case, ..tail] -> {
+      let input_content = get_input_content(input)
+      let action = get_action(head_case)
+      let opt_cont = get_continuation(input, head_case)
+
+      when apply_action(env, state, input_content, action) is {
+        AppliedAction(warning, new_state) ->
+          when opt_cont is {
+            Some(cont) -> Applied(warning, new_state, cont)
+            None -> ApplyHashMismatch
+          }
+        NotAppliedAction -> apply_cases(env, state, input, tail)
+      }
+    }
+  }
+}
+
+fn get_input_content(input: Input) -> InputContent {
+  when input is {
+    NormalInput(input_content) -> input_content
+    MerkleizedInput(input_content, _, _) -> input_content
+  }
+}
+
+fn get_action(case: Case<a>) -> Action {
+  when case is {
+    CCase(action, _) -> action
+    CMerkleizedCase(action, _) -> action
+  }
+}
+
+fn get_continuation(input: Input, case: Case<Contract>) -> Option<Contract> {
+  when input is {
+    NormalInput(_) ->
+      when case is {
+        CCase(_, cont) -> Some(cont)
+        _ -> None
+      }
+    MerkleizedInput(_, input_cont_hash, cont) ->
+      when case is {
+        CMerkleizedCase(_, cont_hash) ->
+          if input_cont_hash == cont_hash {
+            Some(cont)
+          } else {
+            None
+          }
+        _ -> None
+      }
+  }
+}
+
+fn apply_action(
+  env: Environment,
+  state: State,
+  input_content: InputContent,
+  action: Action,
+) -> ApplyAction {
+  when input_content is {
+    IDeposit(acc_id_1, party_1, tok_1, amount) ->
+      when action is {
+        Deposit(acc_id_2, party_2, tok_2, val) ->
+          if
+          acc_id_1 == acc_id_2 && party_1 == party_2 && tok_1 == tok_2 && amount == eval_value(
+            env,
+            state,
+            val,
+          ){
+          
+            let warning =
+              if amount > 0 {
+                ApplyNoWarning
+              } else {
+                ApplyNonPositiveDeposit(party_2, acc_id_2, tok_2, amount)
+              }
+
+            let new_accounts =
+              add_money_to_account(acc_id_1, tok_1, amount, state.accounts)
+
+            let new_state = State { ..state, accounts: new_accounts }
+
+            AppliedAction(warning, new_state)
+          } else {
+            NotAppliedAction
+          }
+        _ -> NotAppliedAction
+      }
+
+    IChoice(choice_id_1, choice) ->
+      when action is {
+        Choice(choice_id_2, bounds) ->
+          if choice_id_1 == choice_id_2 && in_bounds(bounds, choice) {
+            // SCP-5126: Given the precondition that `choices` contains no
+            // duplicate entries, this insertion behaves identically (aside
+            // from internal ordering) to Marlowe's Isabelle semantics
+            // given the precondition that the initial state's `choices`
+            // in Isabelle was sorted and did not contain duplicate entries.
+            let new_state =
+              State {
+                ..state,
+                choices: extensions.insert(state.choices, choice_id_1, choice),
+              }
+
+            AppliedAction(ApplyNoWarning, new_state)
+          } else {
+            NotAppliedAction
+          }
+        _ -> NotAppliedAction
+      }
+
+    INotify ->
+      when action is {
+        Notify(obs) ->
+          if eval_observation(env, state, obs) {
+            AppliedAction(ApplyNoWarning, state)
+          } else {
+            NotAppliedAction
+          }
+        _ -> NotAppliedAction
+      }
+
+    _ -> NotAppliedAction
+  }
+}
+
+fn in_bounds(self: List<Bound>, num: Int) -> Bool {
+  list.any(
+    self,
+    fn(bound) {
+      let Bound(l, u) = bound
+      num >= l && num <= u
+    },
+  )
 }
