@@ -304,8 +304,7 @@ validator(validator_hash: ByteArray) {
 
           // TODO: maybe check on payment cred equality instead of full address
           if addr == own_address {
-            expect True = trace_if_false(output_reference == own_out_ref, @"x")
-
+            expect trace_if_false(output_reference == own_out_ref, @"x")
             False
           } else {
             when addr.payment_credential is {
@@ -348,7 +347,7 @@ validator(validator_hash: ByteArray) {
     // Validate all inputs are authorized
     // Check that the required signatures and role tokens are present.
     // [Marlowe-Cardano Specification: "Constraint 14. Inputs authorized".]
-    expect True =
+    expect
       list.all(
         input_contents,
         fn(input_content) {
@@ -363,7 +362,6 @@ validator(validator_hash: ByteArray) {
                   check_role_token_is_spent(tx_inputs, marlowe_params, role)
               }
             }
-
           when input_content is {
             // The party must witness a deposit.
             IDeposit(_, party, _, _) -> validate_witness_party(party)
@@ -374,13 +372,11 @@ validator(validator_hash: ByteArray) {
           }
         },
       )
-
     // [Marlowe-Cardano Specification: "Constraint 5. Input value from script".]
     // [Marlowe-Cardano Specification: "Constraint 13. Positive balances".]
     // [Marlowe-Cardano Specification: "Constraint 19. No duplicates".]
     // Check that the initial state obeys the Semantic's invariants.
-    expect True = check_state(@"i", script_in_value, marlowe_state)
-
+    expect check_state(@"i", script_in_value, marlowe_state)
     // [Marlowe-Cardano Specification: "Constraint 0. Input to semantics".]
     // Package the inputs to be applied in the semantics.
     let tx_input = TransactionInput { tx_interval: interval, tx_inputs: inputs }
@@ -410,12 +406,11 @@ validator(validator_hash: ByteArray) {
 
         // Each party must receive as least as much value as the semantics specify.
         // [Marlowe-Cardano Specification: "Constraint 15. Sufficient payment."]
-        expect True =
+        expect
           list.all(
             payouts_by_parties,
             fn(payout) -> Bool {
               let (party, val) = payout
-
               when party is {
                 PAddress(_, address) -> {
                   let output_val =
@@ -430,42 +425,32 @@ validator(validator_hash: ByteArray) {
                         }
                       },
                     )
-
                   // None of these should fail unless ada is missing 
                   expect [(p_ada_policy, p_ada_balance), ..p_rest_values] =
                     dict.to_list(value.to_dict(val))
-
                   expect [(_, p_ada_amount)] = dict.to_list(p_ada_balance)
-
                   expect [(o_ada_policy, o_ada_balance), ..o_rest_values] =
                     dict.to_list(value.to_dict(output_val))
-
                   expect [(_, o_ada_amount)] = dict.to_list(o_ada_balance)
-
-                  expect True =
+                  expect
                     trace_if_false(
                       o_ada_amount >= p_ada_amount && p_ada_policy == ada_policy_id && o_ada_policy == ada_policy_id,
                       @"p",
                     )
-
                   trace_if_false(p_rest_values == o_rest_values, @"p")
                 }
-
                 PRole(role) -> {
                   let hsh = dict.find(datums, (marlowe_params, role))
-
                   let addr =
                     Address {
                       payment_credential: ScriptCredential(validator_hash),
                       stake_credential: None,
                     }
-
                   trace_if_false(
                     list.any(
                       tx_outputs,
                       fn(output) {
                         let Output { address, value, datum, .. } = output
-
                         when datum is {
                           DatumHash(svh) ->
                             val == value && hsh == Some(svh) && address == addr
@@ -479,7 +464,6 @@ validator(validator_hash: ByteArray) {
               }
             },
           )
-
         when contract is {
           // [Marlowe-Cardano Specification: "Constraint 4. No output to script on close".]
           Close ->
@@ -538,21 +522,19 @@ validator(validator_hash: ByteArray) {
                 [output] -> output
                 _ -> {
                   trace @"o"
-                  error
+                  fail
                 }
               }
 
             // [Marlowe-Cardano Specification: "Constraint 3. Single Marlowe output".]
             // [Marlowe-Cardano Specification: "Constraint 6. Output value to script."]
             // Check that the single Marlowe output has the correct datum and value.
-            expect True = check_own_output(hsh, final_balance, own_output)
-
+            expect check_own_output(hsh, final_balance, own_output)
             // [Marlowe-Cardano Specification: "Constraint 18. Final balance."]
             // [Marlowe-Cardano Specification: "Constraint 13. Positive balances".]
             // [Marlowe-Cardano Specification: "Constraint 19. No duplicates".]
             // Check that the final state obeys the Semantic's invariants.
-            expect True = check_state(@"o", final_balance, state)
-
+            expect check_state(@"o", final_balance, state)
             // [Marlowe-Cardano Specification: "20. Single satsifaction".]
             // Either there must be no payouts, or there must be no other validators.
             trace_if_false(
@@ -570,30 +552,30 @@ validator(validator_hash: ByteArray) {
         when e is {
           TEAmbiguousTimeIntervalError -> {
             trace @"i"
-            error
+            fail
           }
           TEApplyNoMatchError -> {
             trace @"n"
-            error
+            fail
           }
           TEIntervalError(interval_error) ->
             when interval_error is {
               InvalidInterval(_) -> {
                 trace @"j"
-                error
+                fail
               }
               IntervalInPastError(_, _) -> {
                 trace @"k"
-                error
+                fail
               }
             }
           TEUselessTransaction -> {
             trace @"u"
-            error
+            fail
           }
           TEHashMismatch -> {
             trace @"m"
-            error
+            fail
           }
         }
     }
@@ -653,7 +635,7 @@ fn check_state(tag: String, expected: ContextValue, state: State) -> Bool {
   // [Marlowe-Cardano Specification: "Constraint 5. Input value from script".]
   // and/or
   // [Marlowe-Cardano Specification: "Constraint 18. Final balance."]
-  expect True =
+  expect
     trace_if_false(
       list.foldr(
         accounts,
@@ -661,23 +643,16 @@ fn check_state(tag: String, expected: ContextValue, state: State) -> Bool {
         fn(account, acc) {
           let (IdToken { token: Token { policy_id, asset_name }, .. }, balance) =
             account
-
           // [Marlowe-Cardano Specification: "Constraint 13. Positive balances".]
-          expect True = trace_if_false(balance > 0, string.concat(@"b", tag))
-
+          expect trace_if_false(balance > 0, string.concat(@"b", tag))
           value.add(acc, policy_id, asset_name, balance)
         },
       ) == expected,
       string.concat(@"v", tag),
     )
-
   // [Marlowe-Cardano Specification: "Constraint 19. No duplicates".]
-  expect True =
-    trace_if_false(no_duplicates(accounts), string.concat(@"ea", tag))
-
-  expect True =
-    trace_if_false(no_duplicates(choices), string.concat(@"ec", tag))
-
+  expect trace_if_false(no_duplicates(accounts), string.concat(@"ea", tag))
+  expect trace_if_false(no_duplicates(choices), string.concat(@"ec", tag))
   trace_if_false(no_duplicates(bound_values), string.concat(@"eb", tag))
 }
 
@@ -1358,8 +1333,6 @@ fn apply_action(
           }
         _ -> NotAppliedAction
       }
-
-    _ -> NotAppliedAction
   }
 }
 
