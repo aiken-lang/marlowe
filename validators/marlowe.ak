@@ -30,8 +30,9 @@ validator {
   }
 }
 
-type MarloweParams =
-  PolicyId
+type MarloweParams {
+  role_currency: ByteArray,
+}
 
 type Party {
   PAddress { network: Int, address: Address }
@@ -284,6 +285,7 @@ validator(validator_hash: ByteArray) {
     } = transaction
 
     let MarloweData { marlowe_params, marlowe_state, marlowe_contract } = datum
+    let MarloweParams { role_currency: marlowe_params } = marlowe_params
 
     expect Some(own_input) =
       list.find(tx_inputs, fn(input) { input.output_reference == own_out_ref })
@@ -397,7 +399,7 @@ validator(validator_hash: ByteArray) {
         // and contract resulting from the semantics computation.
         let marlowe_data =
           MarloweData {
-            marlowe_params,
+            marlowe_params: MarloweParams { role_currency: marlowe_params },
             marlowe_state: state,
             marlowe_contract: contract,
           }
