@@ -66,8 +66,9 @@ type ChoiceId {
   party: Party,
 }
 
-type ValueId =
-  ByteArray
+type ValueId {
+  id: ByteArray,
+}
 
 type TimeOut =
   Int
@@ -122,7 +123,7 @@ type Accounts =
 type State {
   accounts: Accounts,
   choices: List<(ChoiceId, Int)>,
-  bound_values: List<(ByteArray, Int)>,
+  bound_values: List<(ValueId, Int)>,
   min_time: Int,
 }
 
