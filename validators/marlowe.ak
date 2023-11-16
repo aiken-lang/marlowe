@@ -234,7 +234,8 @@ type IntervalResult {
 }
 
 type Environment {
-  time_interval: (Int, Int),
+  start_time: Int,
+  end_time: Int,
 }
 
 type ApplyWarning {
@@ -750,7 +751,7 @@ fn fix_interval(interval: (Int, Int), min_time: Int) -> IntervalResult {
         l
       }
 
-    IntervalTrimmed(Environment { time_interval: (new_low, u) }, new_low)
+    IntervalTrimmed(Environment { start_time: new_low, end_time: u }, new_low)
   }
 }
 
@@ -946,7 +947,7 @@ fn reduce_contract_step(env: Environment, state: State, contract: Contract) {
     }
 
     When(_, timeout, cont) -> {
-      let (start_time, end_time) = env.time_interval
+      let Environment { start_time, end_time } = env
 
       // if timeout in future – do not reduce
       if end_time < timeout {
@@ -1068,12 +1069,12 @@ fn eval_value(
         None -> 0
       }
     TimeIntervalStart -> {
-      let (start_time, _) = env.time_interval
+      let Environment { start_time, .. } = env
 
       start_time
     }
     TimeIntervalEnd -> {
-      let (_, end_time) = env.time_interval
+      let Environment { end_time, .. } = env
 
       end_time
     }
