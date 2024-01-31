@@ -1,5 +1,4 @@
 use aiken/builtin
-use aiken/cbor
 use aiken/dict
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
@@ -270,11 +269,11 @@ type ApplyAction {
 }
 
 validator(validator_hash: ByteArray) {
-  fn execute(datum: Data, redeemer: Data, ctx: ScriptContext) -> Bool {
-    // trace cbor.diagnostic(redeemer)
-    expect datum: MarloweData = datum
-    expect redeemer: MarloweInput = redeemer
-
+  fn execute(
+    datum: MarloweData,
+    redeemer: MarloweInput,
+    ctx: ScriptContext,
+  ) -> Bool {
     let ScriptContext { transaction, purpose } = ctx
     expect Spend(own_out_ref) = purpose
 
@@ -430,24 +429,18 @@ validator(validator_hash: ByteArray) {
                         }
                       },
                     )
-                  trace val |> cbor.diagnostic()
+
                   trace_if_false(greater_eq_value(output_val, val), @"p")
                 }
                 PRole(role) -> {
                   let hsh =
                     dict.find(datums, Datum { currency: marlowe_params, role })
+
                   let addr =
                     Address {
                       payment_credential: ScriptCredential(validator_hash),
                       stake_credential: None,
                     }
-
-                  trace tx_outputs
-                    |> list.length
-                    |> cbor.diagnostic()
-
-                  trace hsh
-                    |> cbor.diagnostic()
 
                   trace_if_false(
                     list.any(
