@@ -12,9 +12,9 @@ use aiken/transaction/credential.{
   Address, ScriptCredential, VerificationKeyCredential,
 }
 use aiken/transaction/value.{
-  AssetName, PolicyId, Value as ContextValue, ada_policy_id, quantity_of,
+  AssetName, PolicyId, Value as ContextValue, quantity_of,
 }
-use marlowe/extensions
+use marlowe/extensions.{greater_eq_value}
 
 type Datum {
   currency: PolicyId,
@@ -431,19 +431,7 @@ validator(validator_hash: ByteArray) {
                       },
                     )
                   trace val |> cbor.diagnostic()
-                  // None of these should fail unless ada is missing 
-                  expect [(p_ada_policy, p_ada_balance), ..p_rest_values] =
-                    dict.to_list(value.to_dict(val))
-                  expect [(_, p_ada_amount)] = dict.to_list(p_ada_balance)
-                  expect [(o_ada_policy, o_ada_balance), ..o_rest_values] =
-                    dict.to_list(value.to_dict(output_val))
-                  expect [(_, o_ada_amount)] = dict.to_list(o_ada_balance)
-                  expect trace_if_false(and {
-                        (o_ada_amount >= p_ada_amount)?,
-                        (p_ada_policy == ada_policy_id)?,
-                        (o_ada_policy == ada_policy_id)?,
-                      }, @"p")
-                  trace_if_false(p_rest_values == o_rest_values, @"p")
+                  trace_if_false(greater_eq_value(output_val, val), @"p")
                 }
                 PRole(role) -> {
                   let hsh =
@@ -468,7 +456,7 @@ validator(validator_hash: ByteArray) {
                         let Output { address, value, datum, .. } = output
                         when datum is {
                           DatumHash(svh) -> and {
-                              (val == value)?,
+                              greater_eq_value(value, val)?,
                               (hsh == Some(svh))?,
                               (address == addr)?,
                             }

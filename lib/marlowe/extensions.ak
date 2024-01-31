@@ -1,3 +1,7 @@
+use aiken/dict.{to_list}
+use aiken/list
+use aiken/transaction/value.{Value, quantity_of, to_dict}
+
 pub fn insert(self: List<(a, b)>, key: a, value: b) -> List<(a, b)> {
   when self is {
     [] ->
@@ -46,4 +50,25 @@ pub fn remove(self: List<(a, b)>, key: a) -> List<(a, b)> {
         [(k, v), ..remove(tail, key)]
       }
   }
+}
+
+pub fn greater_eq_value(self: Value, other: Value) -> Bool {
+  other
+    |> to_dict
+    |> to_list
+    |> list.all(
+         fn(other_item) {
+           let (other_policy, other_map) = other_item
+
+           other_map
+             |> to_list
+             |> list.all(
+                  fn(token) {
+                    let (token_name, token_amount) = token
+
+                    quantity_of(self, other_policy, token_name) >= token_amount
+                  },
+                )
+         },
+       )
 }
