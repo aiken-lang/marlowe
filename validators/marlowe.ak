@@ -687,10 +687,9 @@ fn payout_by_party(
       if amount > 0 {
         [(party, value.from_asset(policy_id, asset_name, amount)), ..acc]
       } else {
-        []
+        acc
       }
-    Account(_) ->
-      []
+    Account(_) -> acc
   }
 }
 
