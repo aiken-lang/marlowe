@@ -1,4 +1,5 @@
 use aiken/builtin
+use aiken/cbor
 use aiken/dict
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
@@ -35,7 +36,7 @@ type MarloweParams {
 }
 
 type Party {
-  PAddress { network: Int, address: Address }
+  PAddress { network: Bool, address: Address }
   PRole { asset_name: AssetName }
 }
 
@@ -269,11 +270,11 @@ type ApplyAction {
 }
 
 validator(validator_hash: ByteArray) {
-  fn execute(
-    datum: MarloweData,
-    redeemer: MarloweInput,
-    ctx: ScriptContext,
-  ) -> Bool {
+  fn execute(datum: Data, redeemer: Data, ctx: ScriptContext) -> Bool {
+    // trace cbor.diagnostic(redeemer)
+    expect datum: MarloweData = datum
+    expect redeemer: MarloweInput = redeemer
+
     let ScriptContext { transaction, purpose } = ctx
     expect Spend(own_out_ref) = purpose
 
@@ -429,6 +430,7 @@ validator(validator_hash: ByteArray) {
                         }
                       },
                     )
+                  trace val |> cbor.diagnostic()
                   // None of these should fail unless ada is missing 
                   expect [(p_ada_policy, p_ada_balance), ..p_rest_values] =
                     dict.to_list(value.to_dict(val))
@@ -436,28 +438,40 @@ validator(validator_hash: ByteArray) {
                   expect [(o_ada_policy, o_ada_balance), ..o_rest_values] =
                     dict.to_list(value.to_dict(output_val))
                   expect [(_, o_ada_amount)] = dict.to_list(o_ada_balance)
-                  expect
-                    trace_if_false(
-                      o_ada_amount >= p_ada_amount && p_ada_policy == ada_policy_id && o_ada_policy == ada_policy_id,
-                      @"p",
-                    )
+                  expect trace_if_false(and {
+                        (o_ada_amount >= p_ada_amount)?,
+                        (p_ada_policy == ada_policy_id)?,
+                        (o_ada_policy == ada_policy_id)?,
+                      }, @"p")
                   trace_if_false(p_rest_values == o_rest_values, @"p")
                 }
                 PRole(role) -> {
-                  let hsh = dict.find(datums, (marlowe_params, role))
+                  let hsh =
+                    dict.find(datums, Datum { currency: marlowe_params, role })
                   let addr =
                     Address {
                       payment_credential: ScriptCredential(validator_hash),
                       stake_credential: None,
                     }
+
+                  trace tx_outputs
+                    |> list.length
+                    |> cbor.diagnostic()
+
+                  trace hsh
+                    |> cbor.diagnostic()
+
                   trace_if_false(
                     list.any(
                       tx_outputs,
                       fn(output) {
                         let Output { address, value, datum, .. } = output
                         when datum is {
-                          DatumHash(svh) ->
-                            val == value && hsh == Some(svh) && address == addr
+                          DatumHash(svh) -> and {
+                              (val == value)?,
+                              (hsh == Some(svh))?,
+                              (address == addr)?,
+                            }
                           _ -> False
                         }
                       },
@@ -692,9 +706,10 @@ fn payout_by_party(
       if amount > 0 {
         [(party, value.from_asset(policy_id, asset_name, amount)), ..acc]
       } else {
-        acc
+        []
       }
-    Account(_) -> acc
+    Account(_) ->
+      []
   }
 }
 
