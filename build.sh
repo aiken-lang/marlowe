@@ -1,5 +1,5 @@
 #!/opt/homebrew/bin/fish
-aiken build
+aiken build --trace-level verbose
 
 aiken blueprint apply --validator "marlowe.execute" --out plutus.json 581c(cat plutus.json | jq -r '.validators[1].hash')
 
