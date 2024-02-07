@@ -1,5 +1,4 @@
 use aiken/builtin
-use aiken/cbor
 use aiken/dict
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
@@ -15,56 +14,30 @@ use aiken/transaction/value.{
   AssetName, PolicyId, Value as ContextValue, quantity_of,
 }
 use marlowe/extensions.{greater_eq_value}
-
-type Datum {
-  currency: PolicyId,
-  role: AssetName,
-}
+use marlowe/types as mt
 
 validator {
-  fn role_payout(datum: Datum, _red, ctx: ScriptContext) -> Bool {
+  fn role_payout(datum: mt.Datum, _red, ctx: ScriptContext) -> Bool {
     // clean way to pull out inputs from the script context
     let ScriptContext { transaction: Transaction { inputs, .. }, .. } = ctx
 
-    let Datum { currency, role } = datum
+    let mt.Datum { currency, role } = datum
     check_role_token_is_spent(inputs, currency, role)
   }
 }
 
-type MarloweParams {
-  role_currency: ByteArray,
-}
-
-type Party {
-  PAddress { network: Bool, address: Address }
-  PRole { asset_name: AssetName }
-}
-
-type AccountId =
-  Party
-
-type Token {
-  policy_id: PolicyId,
-  asset_name: AssetName,
-}
-
-type Payee {
-  Account(AccountId)
-  Party(Party)
-}
-
 type Payment {
-  Payment(AccountId, Payee, Token, Int)
+  Payment(mt.AccountId, mt.Payee, mt.Token, Int)
 }
 
 type IdToken {
-  account_id: AccountId,
-  token: Token,
+  account_id: mt.AccountId,
+  token: mt.Token,
 }
 
 type ChoiceId {
   choice_name: ByteArray,
-  party: Party,
+  party: mt.Party,
 }
 
 type ValueId {
@@ -79,7 +52,7 @@ type Bound {
 }
 
 type Value<a> {
-  AvailableMoney(AccountId, Token)
+  AvailableMoney(mt.AccountId, mt.Token)
   Constant(Int)
   NegValue(Value<a>)
   AddValue(Value<a>, Value<a>)
@@ -109,9 +82,9 @@ type Observation {
 
 type Action {
   Deposit {
-    account: AccountId,
-    party: Party,
-    token: Token,
+    account: mt.AccountId,
+    party: mt.Party,
+    token: mt.Token,
     obs_val: Value<Observation>,
   }
   Choice(ChoiceId, List<Bound>)
@@ -135,7 +108,7 @@ type Case<a> {
 
 type Contract {
   Close
-  Pay(Party, Payee, Token, Value<Observation>, Contract)
+  Pay(mt.Party, mt.Payee, mt.Token, Value<Observation>, Contract)
   If(Observation, Contract, Contract)
   When(List<Case<Contract>>, TimeOut, Contract)
   Let(ValueId, Value<Observation>, Contract)
@@ -143,7 +116,7 @@ type Contract {
 }
 
 type MarloweData {
-  marlowe_params: MarloweParams,
+  marlowe_params: mt.MarloweParams,
   marlowe_state: State,
   marlowe_contract: Contract,
 }
@@ -159,9 +132,9 @@ type TransactionInput {
 }
 
 type TransactionWarning {
-  TransactionNonPositiveDeposit(Party, AccountId, Token, Int)
-  TransactionNonPositivePay(AccountId, Payee, Token, Int)
-  TransactionPartialPay(AccountId, Payee, Token, Int, Int)
+  TransactionNonPositiveDeposit(mt.Party, mt.AccountId, mt.Token, Int)
+  TransactionNonPositivePay(mt.AccountId, mt.Payee, mt.Token, Int)
+  TransactionPartialPay(mt.AccountId, mt.Payee, mt.Token, Int, Int)
   //                       ^ src    ^ dest       ^ paid ^ expected
   TransactionShadowing(ValueId, Int, Int)
   //                      oldVal ^    ^ newVal 
@@ -170,8 +143,8 @@ type TransactionWarning {
 
 type ReduceWarning {
   ReduceNoWarning
-  ReduceNonPositivePay(AccountId, Payee, Token, Int)
-  ReducePartialPay(AccountId, Payee, Token, Int, Int)
+  ReduceNonPositivePay(mt.AccountId, mt.Payee, mt.Token, Int)
+  ReducePartialPay(mt.AccountId, mt.Payee, mt.Token, Int, Int)
   ReduceShadowing(ValueId, Int, Int)
   ReduceAssertionFailed
 }
@@ -215,7 +188,7 @@ type MarloweInput =
   List<MarloweTxInput>
 
 type InputContent {
-  IDeposit(AccountId, Party, Token, Int)
+  IDeposit(mt.AccountId, mt.Party, mt.Token, Int)
   IChoice(ChoiceId, Int)
   INotify
 }
@@ -242,7 +215,7 @@ type Environment {
 
 type ApplyWarning {
   ApplyNoWarning
-  ApplyNonPositiveDeposit(Party, AccountId, Token, Int)
+  ApplyNonPositiveDeposit(mt.Party, mt.AccountId, mt.Token, Int)
 }
 
 type ApplyResult {
@@ -288,7 +261,7 @@ validator(validator_hash: ByteArray) {
     } = transaction
 
     let MarloweData { marlowe_params, marlowe_state, marlowe_contract } = datum
-    let MarloweParams { role_currency: marlowe_params } = marlowe_params
+    let mt.MarloweParams { role_currency: marlowe_params } = marlowe_params
 
     expect Some(own_input) =
       list.find(tx_inputs, fn(input) { input.output_reference == own_out_ref })
@@ -359,11 +332,11 @@ validator(validator_hash: ByteArray) {
           let validate_witness_party =
             fn(party) -> Bool {
               when party is {
-                PAddress(_, Address { payment_credential, .. }) -> {
+                mt.PartyAddress(_, Address { payment_credential, .. }) -> {
                   expect VerificationKeyCredential(pkh) = payment_credential
                   list.has(extra_signatories, pkh)
                 }
-                PRole(role) ->
+                mt.Role(role) ->
                   check_role_token_is_spent(tx_inputs, marlowe_params, role)
               }
             }
@@ -402,7 +375,7 @@ validator(validator_hash: ByteArray) {
         // and contract resulting from the semantics computation.
         let marlowe_data =
           MarloweData {
-            marlowe_params: MarloweParams { role_currency: marlowe_params },
+            marlowe_params: mt.MarloweParams { role_currency: marlowe_params },
             marlowe_state: state,
             marlowe_contract: contract,
           }
@@ -417,7 +390,7 @@ validator(validator_hash: ByteArray) {
             fn(payout) -> Bool {
               let (party, val) = payout
               when party is {
-                PAddress(_, address) -> {
+                mt.PartyAddress(_, address) -> {
                   let output_val =
                     list.foldr(
                       tx_outputs,
@@ -433,9 +406,12 @@ validator(validator_hash: ByteArray) {
 
                   trace_if_false(greater_eq_value(output_val, val), @"p")
                 }
-                PRole(role) -> {
+                mt.Role(role) -> {
                   let hsh =
-                    dict.find(datums, Datum { currency: marlowe_params, role })
+                    dict.find(
+                      datums,
+                      mt.Datum { currency: marlowe_params, role },
+                    )
 
                   let addr =
                     Address {
@@ -482,7 +458,7 @@ validator(validator_hash: ByteArray) {
                 value.zero(),
                 fn(input, acc) {
                   when input is {
-                    IDeposit(_, _, Token { policy_id, asset_name }, balance) ->
+                    IDeposit(_, _, mt.Token { policy_id, asset_name }, balance) ->
                       if balance > 0 {
                         value.add(acc, policy_id, asset_name, balance)
                       } else {
@@ -641,8 +617,10 @@ fn check_state(tag: String, expected: ContextValue, state: State) -> Bool {
         accounts,
         value.zero(),
         fn(account, acc) {
-          let (IdToken { token: Token { policy_id, asset_name }, .. }, balance) =
-            account
+          let (
+            IdToken { token: mt.Token { policy_id, asset_name }, .. },
+            balance,
+          ) = account
           // [Marlowe-Cardano Specification: "Constraint 13. Positive balances".]
           expect trace_if_false(balance > 0, string.concat(@"b", tag))
           value.add(acc, policy_id, asset_name, balance)
@@ -679,18 +657,18 @@ fn no_duplicates(xs: List<a>) -> Bool {
 
 fn payout_by_party(
   payment: Payment,
-  acc: List<(Party, ContextValue)>,
-) -> List<(Party, ContextValue)> {
-  let Payment(_, payee, Token { policy_id, asset_name }, amount) = payment
+  acc: List<(mt.Party, ContextValue)>,
+) -> List<(mt.Party, ContextValue)> {
+  let Payment(_, payee, mt.Token { policy_id, asset_name }, amount) = payment
 
   when payee is {
-    Party(party) ->
+    mt.PartyPayee(party) ->
       if amount > 0 {
         [(party, value.from_asset(policy_id, asset_name, amount)), ..acc]
       } else {
         acc
       }
-    Account(_) -> acc
+    mt.AccountPayee(_) -> acc
   }
 }
 
@@ -893,7 +871,9 @@ fn reduce_contract_step(env: Environment, state: State, contract: Contract) {
 
           Reduced(
             ReduceNoWarning,
-            ReduceWithPayment(Payment(party, Party(party), token, amount)),
+            ReduceWithPayment(
+              Payment(party, mt.PartyPayee(party), token, amount),
+            ),
             new_state,
             Close,
           )
@@ -1095,8 +1075,8 @@ fn eval_value(
 }
 
 fn money_in_account(
-  account_id: AccountId,
-  token: Token,
+  account_id: mt.AccountId,
+  token: mt.Token,
   accounts: Accounts,
 ) -> Int {
   when extensions.get(accounts, IdToken { account_id, token }) is {
@@ -1106,8 +1086,8 @@ fn money_in_account(
 }
 
 fn update_money_in_account(
-  account_id: AccountId,
-  token: Token,
+  account_id: mt.AccountId,
+  token: mt.Token,
   amount: Int,
   accounts: Accounts,
 ) -> Accounts {
@@ -1119,24 +1099,25 @@ fn update_money_in_account(
 }
 
 fn give_money(
-  account_id: AccountId,
-  payee: Payee,
-  token: Token,
+  account_id: mt.AccountId,
+  payee: mt.Payee,
+  token: mt.Token,
   amount: Int,
   accounts: Accounts,
 ) -> (ReduceEffect, Accounts) {
   let new_accounts =
     when payee is {
-      Party(_) -> accounts
-      Account(acc_id) -> add_money_to_account(acc_id, token, amount, accounts)
+      mt.PartyPayee(_) -> accounts
+      mt.AccountPayee(acc_id) ->
+        add_money_to_account(acc_id, token, amount, accounts)
     }
 
   (ReduceWithPayment(Payment(account_id, payee, token, amount)), new_accounts)
 }
 
 fn add_money_to_account(
-  acc_id: AccountId,
-  token: Token,
+  acc_id: mt.AccountId,
+  token: mt.Token,
   amount: Int,
   accounts: Accounts,
 ) -> Accounts {
@@ -1151,7 +1132,9 @@ fn add_money_to_account(
   }
 }
 
-fn refund_one(accounts: Accounts) -> Option<((Party, Token, Int), Accounts)> {
+fn refund_one(
+  accounts: Accounts,
+) -> Option<((mt.Party, mt.Token, Int), Accounts)> {
   when accounts is {
     [] -> None
     [(IdToken { account_id, token }, balance), ..rest] ->
