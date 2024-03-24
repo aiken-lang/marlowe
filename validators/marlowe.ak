@@ -1,5 +1,4 @@
 use aiken/builtin
-use aiken/cbor
 use aiken/dict
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
