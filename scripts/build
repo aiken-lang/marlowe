@@ -1,8 +1,12 @@
-#!/opt/homebrew/bin/fish
-aiken build
+#!/usr/bin/env bash
 
-aiken blueprint apply --validator "marlowe.execute" --out plutus.json 581c(cat plutus.json | jq -r '.validators[1].hash')
+# Always execute from within the parent folder.
+cd $(dirname -- "${BASH_SOURCE[0]}")/..
 
-aiken blueprint convert --validator "marlowe.role_payout" > ../marlowe-plutus/marlowe-plutus/payout.plutus
+aiken build --uplc
 
-aiken blueprint convert --validator "marlowe.execute" > ../marlowe-plutus/marlowe-plutus/semantics.plutus
+aiken blueprint apply --validator "marlowe.execute" --out plutus.json  "581c$(cat plutus.json | jq -r '.validators[1].hash')"
+
+aiken blueprint convert --validator "marlowe.role_payout" > artifacts/marlowe.role_payout.plutus
+
+aiken blueprint convert --validator "marlowe.execute" > artifacts/marlowe.execute.plutus
