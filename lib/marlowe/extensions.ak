@@ -57,18 +57,18 @@ pub fn greater_eq_value(self: Value, other: Value) -> Bool {
     |> to_dict
     |> to_list
     |> list.all(
-         fn(other_item) {
-           let (other_policy, other_map) = other_item
+        fn(other_item) {
+          let (other_policy, other_map) = other_item
 
-           other_map
-             |> to_list
-             |> list.all(
-                  fn(token) {
-                    let (token_name, token_amount) = token
+          other_map
+            |> to_list
+            |> list.all(
+                fn(token) {
+                  let (token_name, token_amount) = token
 
-                    quantity_of(self, other_policy, token_name) >= token_amount
-                  },
-                )
-         },
-       )
+                  quantity_of(self, other_policy, token_name) >= token_amount
+                },
+              )
+        },
+      )
 }
